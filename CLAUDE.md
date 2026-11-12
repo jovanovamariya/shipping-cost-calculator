@@ -139,17 +139,17 @@ The reusable part of the starter — works for any domain:
 
 ---
 
-<!-- ADAPT: Everything below is the shipping cost calculator that ships with
-     this starter as a reference. It shows the level of detail that helps
-     Claude. Delete it once the sections above describe your own domain. -->
+## Project — Currency Converter
 
-## Worked Example — Shipping Cost Calculator
+A Spring Boot REST service (with a React frontend) that converts amounts between currencies using rates from an external provider (Frankfurter), with caching and resilience when the provider fails.
 
-A Spring Boot REST service that calculates shipping costs based on parcel weight, destination zone, and order value.
-
-- **Architecture:** `controller/` (REST, no logic) → `service/` (`ShippingCostService`, pure calculation, no DB) → `model/` (`ShippingRequest`, `ShippingCost`, enums `WeightTier`, `DistanceZone`).
-- **Processing order:** (1) base rate from weight tier → (2) zone multiplier (domestic ×1.0, European ×1.5, international ×2.5) → (3) free-shipping check (domestic order total ≥ £75.00 → £0.00). The order matters; every spec and test follows it.
-- **Money:** `BigDecimal`, scale 2, `RoundingMode.HALF_UP`, compare with `compareTo()`.
-- **API:** `POST /api/shipping/calculate` taking `{ weightKg, zone, orderTotal }` and returning `{ totalCost, breakdown: { baseRate, zoneMultiplier, zonedRate, freeShippingApplied } }`.
-- **Spec files:** `weight-tiers.specs.md`, `distance-zones.specs.md`, `free-shipping.specs.md`, `api-security.specs.md`.
-- **Security:** `X-API-Key` header; `USER` can calculate, `ADMIN` can also `GET /api/admin/rates`. No key → 401, invalid → 401, wrong role → 403. Swagger excluded from auth.
+- **Architecture:** `controller/` (REST, no logic) → `service/` (conversion, caching and fallback logic) → `RatesProvider` interface (Frankfurter client is one implementation; tests swap in a fake) → `model/` (request/response DTOs, rates snapshot with publication date and fetched-at).
+- **Processing order:** (1) normalise currency codes to upper case → (2) validate amount (> 0) and codes against the supported list → (3) same currency → rate 1, no provider call → (4) rates for the base: cache (< 1h since fetch) → provider → stale fallback (within max stale age) → 503 → (5) multiply and round. Every spec and test follows this order.
+- **Two times per rate set — never mix them:** the **publication date** (provider's date) is shown to users, reported as `rateDate`, and measures stale age; **fetched-at** (our timestamp) is internal and only drives cache TTLs. A recent fetch never makes old rates look fresh.
+- **Money:** `BigDecimal`, scale 2, `RoundingMode.HALF_UP` on the converted amount (the rate is not rounded), compare with `compareTo()`.
+- **API:** `POST /api/convert` taking `{ amount, from, to }` and returning `{ amount, from, to, result, rate, rateDate, stale }`; `GET /api/currencies` returns the supported currencies sorted by code. Errors use one shape `{ timestamp, status, error, message, path }`, never a stack trace. Unsupported currency → 400 `"Unsupported currency: XYZ"`; no usable rates → 503 `"Exchange rates are temporarily unavailable. Please try again later."`
+- **Resilience:** 3 s timeout; circuit breaker over a 10-minute window, min 3 calls, opens at ≥ 50% failures (5xx, connection errors, timeouts — not 4xx), 5 minutes open, then one trial call. Rate and currency-list calls share it. `stale: true` only when served from fallback.
+- **Configuration (documented in the README):** max stale age in days (default: no limit; recommend ≥ 4), currency-list TTL (default 24h), allowed CORS origins (default `http://localhost:5173`).
+- **Observability:** `GET /actuator/health` shows app status and circuit state; every provider call logs duration and outcome (success/failure/fallback); every circuit state change is logged.
+- **Spec files:** `currency-conversion.specs.md`, `supported-currencies.specs.md`, `rate-freshness-and-fallback.specs.md`, `provider-resilience.specs.md`, `browser-access.specs.md`.
+- **Security:** no authentication; browser access restricted by CORS to the configured frontend origins.
