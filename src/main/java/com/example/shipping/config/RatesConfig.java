@@ -8,8 +8,16 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
 
+import java.time.Clock;
+import java.time.Duration;
+
 @Configuration
 public class RatesConfig {
+
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
+    }
 
     @Bean
     RatesProvider ratesProvider(RestClient.Builder restClientBuilder,
@@ -18,7 +26,8 @@ public class RatesConfig {
     }
 
     @Bean
-    CurrencyService currencyService(RatesProvider ratesProvider) {
-        return new CurrencyService(ratesProvider);
+    CurrencyService currencyService(RatesProvider ratesProvider, Clock clock,
+                                    @Value("${currencies.list-ttl}") Duration listTtl) {
+        return new CurrencyService(ratesProvider, clock, listTtl);
     }
 }
