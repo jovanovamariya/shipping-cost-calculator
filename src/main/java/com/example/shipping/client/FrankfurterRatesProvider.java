@@ -4,6 +4,7 @@ import com.example.shipping.service.RatesProvider;
 import com.example.shipping.service.RatesProviderException;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Map;
@@ -27,6 +28,8 @@ public class FrankfurterRatesProvider implements RatesProvider {
                     });
         } catch (HttpServerErrorException e) {
             throw new RatesProviderException("Frankfurter answered " + e.getStatusCode(), e);
+        } catch (ResourceAccessException e) {
+            throw new RatesProviderException("Frankfurter could not be reached", e);
         }
     }
 }

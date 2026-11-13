@@ -1,6 +1,7 @@
 package com.example.shipping.client;
 
 import com.example.shipping.service.RatesProviderException;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
@@ -45,6 +47,15 @@ class FrankfurterRatesProviderTest {
     @DisplayName("The one where Frankfurter answers 500 and the client reports the provider as unavailable")
     void reportsServerErrorAsProviderFailure() {
         frankfurter.stubFor(get("/currencies").willReturn(serverError()));
+
+        assertThatThrownBy(provider::currencies)
+                .isInstanceOf(RatesProviderException.class);
+    }
+
+    @Test
+    @DisplayName("The one where the connection to Frankfurter breaks and the client reports the provider as unavailable")
+    void reportsConnectionErrorAsProviderFailure() {
+        frankfurter.stubFor(get("/currencies").willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
 
         assertThatThrownBy(provider::currencies)
                 .isInstanceOf(RatesProviderException.class);
