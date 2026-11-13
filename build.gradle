@@ -31,6 +31,8 @@ dependencies {
     //   spring-boot-starter-webflux   — for reactive/WebClient
     //   spring-boot-starter-validation — for @Valid annotations
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // Auto-configured RestClient.Builder for calling the rates provider (Boot 4 split this out).
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
 
     // Swagger/OpenAPI — auto-generates API docs from your controllers.
     // Remove if your project doesn't expose a REST API.
@@ -47,6 +49,10 @@ dependencies {
     // it's a visible, first-class test dependency.
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.assertj:assertj-core'
+    // MockMvcTester + @AutoConfigureMockMvc for acceptance tests (Boot 4 split this out).
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    // Stubs the external rates provider (Frankfurter) over real HTTP.
+    testImplementation 'org.wiremock:wiremock-standalone:3.13.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
