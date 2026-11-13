@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CurrencyServiceTest {
 
@@ -80,6 +81,25 @@ class CurrencyServiceTest {
 
         clock.advance(Duration.ofHours(25));
         providerDown.set(true);
+
+        assertThat(service.supportedCurrencies())
+                .containsExactly(new SupportedCurrency("AUD", "Australian Dollar"));
+    }
+
+    @Test
+    @DisplayName("The one where the first load fails, the provider recovers, and the next request loads the list")
+    void loadsListOnceProviderRecoversAfterFailedFirstLoad() {
+        AtomicBoolean providerDown = new AtomicBoolean(true);
+        RatesProvider recoveringProvider = () -> {
+            if (providerDown.get()) {
+                throw new RatesProviderException("provider down", null);
+            }
+            return Map.of("AUD", "Australian Dollar");
+        };
+        CurrencyService service = new CurrencyService(recoveringProvider, clock, LIST_TTL);
+        assertThatThrownBy(service::supportedCurrencies).isInstanceOf(RatesProviderException.class);
+
+        providerDown.set(false);
 
         assertThat(service.supportedCurrencies())
                 .containsExactly(new SupportedCurrency("AUD", "Australian Dollar"));
