@@ -1,7 +1,9 @@
 package com.example.shipping.client;
 
 import com.example.shipping.service.RatesProvider;
+import com.example.shipping.service.RatesProviderException;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.Map;
@@ -17,10 +19,14 @@ public class FrankfurterRatesProvider implements RatesProvider {
 
     @Override
     public Map<String, String> currencies() {
-        return restClient.get()
-                .uri("/currencies")
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {
-                });
+        try {
+            return restClient.get()
+                    .uri("/currencies")
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {
+                    });
+        } catch (HttpServerErrorException e) {
+            throw new RatesProviderException("Frankfurter answered " + e.getStatusCode(), e);
+        }
     }
 }

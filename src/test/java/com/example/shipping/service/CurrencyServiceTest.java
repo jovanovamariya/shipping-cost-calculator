@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,5 +63,25 @@ class CurrencyServiceTest {
         service.supportedCurrencies();
 
         assertThat(providerCalls).hasValue(providerCalledAgain ? 2 : 1);
+    }
+
+    @Test
+    @DisplayName("The one where the list has expired, the refresh fails, and the last loaded list is still served")
+    void servesLastLoadedListWhenRefreshFails() {
+        AtomicBoolean providerDown = new AtomicBoolean(false);
+        RatesProvider flakyProvider = () -> {
+            if (providerDown.get()) {
+                throw new RatesProviderException("provider down", null);
+            }
+            return Map.of("AUD", "Australian Dollar");
+        };
+        CurrencyService service = new CurrencyService(flakyProvider, clock, LIST_TTL);
+        service.supportedCurrencies();
+
+        clock.advance(Duration.ofHours(25));
+        providerDown.set(true);
+
+        assertThat(service.supportedCurrencies())
+                .containsExactly(new SupportedCurrency("AUD", "Australian Dollar"));
     }
 }

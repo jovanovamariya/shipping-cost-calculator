@@ -2,10 +2,12 @@ package com.example.shipping.controller;
 
 import com.example.shipping.model.SupportedCurrency;
 import com.example.shipping.service.CurrencyService;
+import com.example.shipping.service.RatesProviderException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
@@ -39,5 +41,18 @@ class CurrencyControllerTest {
                           { "code": "USD", "name": "United States Dollar" }
                         ]
                         """);
+    }
+
+    @Test
+    @DisplayName("The one where the provider is down and no list was ever loaded — 503 with the unavailable message")
+    void answersServiceUnavailableWhenProviderFails() {
+        given(currencyService.supportedCurrencies())
+                .willThrow(new RatesProviderException("provider down", null));
+
+        assertThat(mvc.get().uri("/api/currencies"))
+                .hasStatus(HttpStatus.SERVICE_UNAVAILABLE)
+                .bodyJson()
+                .extractingPath("$.message").asString()
+                .isEqualTo("Exchange rates are temporarily unavailable. Please try again later.");
     }
 }

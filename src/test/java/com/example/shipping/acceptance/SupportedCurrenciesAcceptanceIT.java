@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -27,6 +28,7 @@ import java.time.Instant;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,6 +118,43 @@ class SupportedCurrenciesAcceptanceIT {
 
             int expectedProviderCalls = providerCalledAgain ? 2 : 1;
             provider.verify(expectedProviderCalls, getRequestedFor(urlEqualTo("/currencies")));
+        }
+    }
+
+    @Nested
+    @DisplayName("Must keep serving the last loaded list when a refresh fails")
+    class ServesLastListWhenRefreshFails {
+
+        @Test
+        @DisplayName("The one where the list was fetched 25 h ago, the provider is down, and the old list is still served")
+        void servesOldListWhenProviderIsDown() {
+            provider.stubFor(get("/currencies").willReturn(okJson("""
+                    { "USD": "United States Dollar", "AUD": "Australian Dollar" }
+                    """)));
+            assertThat(mvc.get().uri("/api/currencies")).hasStatusOk();
+
+            clock.advance(Duration.ofHours(25));
+            provider.stubFor(get("/currencies").willReturn(serverError()));
+
+            MvcTestResult result = mvc.get().uri("/api/currencies").exchange();
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$[*].code").asArray()
+                    .containsExactly("AUD", "USD");
+        }
+
+        @Test
+        @DisplayName("The one where the provider is down on first start and no list was ever loaded — status 503 with \"Exchange rates are temporarily unavailable. Please try again later.\"")
+        void answersUnavailableWhenNoListWasEverLoaded() {
+            provider.stubFor(get("/currencies").willReturn(serverError()));
+
+            MvcTestResult result = mvc.get().uri("/api/currencies").exchange();
+
+            assertThat(result).hasStatus(HttpStatus.SERVICE_UNAVAILABLE);
+            assertThat(result).bodyJson()
+                    .extractingPath("$.message").asString()
+                    .isEqualTo("Exchange rates are temporarily unavailable. Please try again later.");
         }
     }
 }

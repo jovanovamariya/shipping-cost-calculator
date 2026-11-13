@@ -26,10 +26,20 @@ public class CurrencyService {
     public synchronized List<SupportedCurrency> supportedCurrencies() {
         Instant now = clock.instant();
         if (!cachedListIsFresh(now)) {
-            cachedList = fetchSortedList();
-            fetchedAt = now;
+            refreshListOrKeepLast(now);
         }
         return cachedList;
+    }
+
+    private void refreshListOrKeepLast(Instant now) {
+        try {
+            cachedList = fetchSortedList();
+            fetchedAt = now;
+        } catch (RatesProviderException e) {
+            if (cachedList == null) {
+                throw e; // nothing loaded yet, so nothing to fall back to
+            }
+        }
     }
 
     private boolean cachedListIsFresh(Instant now) {
