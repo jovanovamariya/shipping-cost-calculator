@@ -1,5 +1,6 @@
 package com.example.shipping.client;
 
+import com.example.shipping.model.PublishedRates;
 import com.example.shipping.service.RatesProviderException;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
@@ -8,12 +9,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.web.client.RestClient;
 
+import java.time.LocalDate;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +45,23 @@ class FrankfurterRatesProviderTest {
         assertThat(provider.currencies()).containsExactlyInAnyOrderEntriesOf(Map.of(
                 "AUD", "Australian Dollar",
                 "USD", "United States Dollar"));
+    }
+
+    @Test
+    @DisplayName("The one where Frankfurter's latest EUR rates are read with their publication date")
+    void readsLatestRatesWithPublicationDate() {
+        frankfurter.stubFor(get(urlPathEqualTo("/latest"))
+                .withQueryParam("base", equalTo("EUR"))
+                .willReturn(okJson("""
+                        { "amount": 1.0, "base": "EUR", "date": "2026-11-11", "rates": { "USD": 1.0850, "GBP": 0.8712 } }
+                        """)));
+
+        PublishedRates rates = provider.latestRates("EUR");
+
+        assertThat(rates.base()).isEqualTo("EUR");
+        assertThat(rates.publicationDate()).isEqualTo(LocalDate.of(2026, 11, 11));
+        assertThat(rates.rates().get("USD")).isEqualByComparingTo("1.0850");
+        assertThat(rates.rates().get("GBP")).isEqualByComparingTo("0.8712");
     }
 
     @Test

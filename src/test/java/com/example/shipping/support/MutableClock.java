@@ -19,6 +19,10 @@ public class MutableClock extends Clock {
         now = now.plus(duration);
     }
 
+    public void setTo(Instant instant) {
+        now = instant;
+    }
+
     @Override
     public Instant instant() {
         return now;
