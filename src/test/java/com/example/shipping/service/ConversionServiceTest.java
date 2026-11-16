@@ -116,6 +116,21 @@ class ConversionServiceTest {
         assertThat(result.stale()).isFalse();
     }
 
+    @ParameterizedTest(name = "The one where {0} × {1} rounds to {2} (HALF_UP to 2 decimals)")
+    @CsvSource({
+            "100, 1.08125, 108.13",   // exact half → rounds up; HALF_EVEN would give 108.12
+    })
+    void roundsResultToTwoDecimalsHalfUp(String amount, String rate, String expected) {
+        ConversionService service = new ConversionService(
+                ratesFrom(base -> new PublishedRates(base, LocalDate.of(2026, 11, 16),
+                        Map.of("USD", new BigDecimal(rate)))),
+                currenciesOf("EUR", "USD"));
+
+        ConversionResult result = service.convert(new BigDecimal(amount), "EUR", "USD");
+
+        assertThat(result.result()).isEqualByComparingTo(expected);
+    }
+
     @ParameterizedTest(name = "The one where amount {0} is rejected as not greater than zero")
     @CsvSource({
             "0",
