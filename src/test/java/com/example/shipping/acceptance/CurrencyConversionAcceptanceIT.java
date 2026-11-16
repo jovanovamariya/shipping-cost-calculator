@@ -79,6 +79,16 @@ class CurrencyConversionAcceptanceIT {
                         """.formatted(publicationDate, usdRate))));
     }
 
+    // Rates that omit the requested target currency — the service then has no USD rate to multiply by,
+    // which stands in for "an unexpected internal error" without mocking any of our own beans.
+    private void providerPublishesEurRatesWithoutTarget() {
+        provider.stubFor(get(urlPathEqualTo("/latest"))
+                .withQueryParam("base", equalTo("EUR"))
+                .willReturn(okJson("""
+                        { "amount": 1.0, "base": "EUR", "date": "2026-11-11", "rates": { } }
+                        """)));
+    }
+
     private MvcTestResult convert(String amount, String from, String to) {
         return mvc.post().uri("/api/convert")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -141,6 +151,51 @@ class CurrencyConversionAcceptanceIT {
                     .isEqualTo("2026-11-06");
             assertThat(result).bodyJson().extractingPath("$.stale").asBoolean()
                     .isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("Must report every error in one consistent shape without internal details")
+    class ConsistentErrorShape {
+
+        @Test
+        @DisplayName("The one where an unsupported currency returns timestamp, status 400, error \"Bad Request\", message \"Unsupported currency: XYZ\", path \"/api/convert\" — and no stack trace")
+        void unsupportedCurrencyReturnsConsistentErrorShape() {
+            MvcTestResult result = convert("100", "XYZ", "USD");
+
+            assertThat(result).hasStatus(400);
+            assertThat(result).bodyJson().extractingPath("$.status")
+                    .convertTo(InstanceOfAssertFactories.INTEGER).isEqualTo(400);
+            assertThat(result).bodyJson().extractingPath("$.error").asString()
+                    .isEqualTo("Bad Request");
+            assertThat(result).bodyJson().extractingPath("$.message").asString()
+                    .isEqualTo("Unsupported currency: XYZ");
+            assertThat(result).bodyJson().extractingPath("$.path").asString()
+                    .isEqualTo("/api/convert");
+            assertThat(result).bodyJson().extractingPath("$.timestamp").asString()
+                    .isNotBlank();
+            assertThat(result).bodyJson().doesNotHavePath("$.trace");
+        }
+
+        @Test
+        @DisplayName("The one where an unexpected internal error returns the same shape with status 500 and a generic message, with no exception details")
+        void unexpectedErrorReturnsConsistentErrorShapeWithoutDetails() {
+            providerPublishesEurRatesWithoutTarget();
+
+            MvcTestResult result = convert("100", "EUR", "USD");
+
+            assertThat(result).hasStatus(500);
+            assertThat(result).bodyJson().extractingPath("$.status")
+                    .convertTo(InstanceOfAssertFactories.INTEGER).isEqualTo(500);
+            assertThat(result).bodyJson().extractingPath("$.error").asString()
+                    .isEqualTo("Internal Server Error");
+            assertThat(result).bodyJson().extractingPath("$.path").asString()
+                    .isEqualTo("/api/convert");
+            assertThat(result).bodyJson().extractingPath("$.timestamp").asString()
+                    .isNotBlank();
+            assertThat(result).bodyJson().extractingPath("$.message").asString()
+                    .doesNotContain("Exception", "java.");
+            assertThat(result).bodyJson().doesNotHavePath("$.trace");
         }
     }
 }
