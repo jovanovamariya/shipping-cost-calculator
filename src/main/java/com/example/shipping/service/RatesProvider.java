@@ -1,5 +1,7 @@
 package com.example.shipping.service;
 
+import com.example.shipping.model.PublishedRates;
+
 import java.util.Map;
 
 /**
@@ -10,4 +12,7 @@ public interface RatesProvider {
 
     /** Supported currencies as code → name, in whatever order the provider returns them. */
     Map<String, String> currencies();
+
+    /** The latest rates for the base currency, with the date the provider published them. */
+    PublishedRates latestRates(String base);
 }

@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.example.shipping.service.FakeRatesProviders.currenciesFrom;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -32,7 +33,7 @@ class CurrencyServiceTest {
         unordered.put("ZAR", "South African Rand");
         unordered.put("BRL", "Brazilian Real");
         unordered.put("BGN", "Bulgarian Lev");
-        RatesProvider fakeProvider = () -> unordered;
+        RatesProvider fakeProvider = currenciesFrom(() -> unordered);
 
         var currencies = new CurrencyService(fakeProvider, clock, LIST_TTL).supportedCurrencies();
 
@@ -53,10 +54,10 @@ class CurrencyServiceTest {
     })
     void reusesListUntilTtlExpires(String age, Duration elapsed, boolean providerCalledAgain) {
         AtomicInteger providerCalls = new AtomicInteger();
-        RatesProvider countingProvider = () -> {
+        RatesProvider countingProvider = currenciesFrom(() -> {
             providerCalls.incrementAndGet();
             return Map.of("AUD", "Australian Dollar");
-        };
+        });
         CurrencyService service = new CurrencyService(countingProvider, clock, LIST_TTL);
 
         service.supportedCurrencies();
@@ -70,12 +71,12 @@ class CurrencyServiceTest {
     @DisplayName("The one where the list has expired, the refresh fails, and the last loaded list is still served")
     void servesLastLoadedListWhenRefreshFails() {
         AtomicBoolean providerDown = new AtomicBoolean(false);
-        RatesProvider flakyProvider = () -> {
+        RatesProvider flakyProvider = currenciesFrom(() -> {
             if (providerDown.get()) {
                 throw new RatesProviderException("provider down", null);
             }
             return Map.of("AUD", "Australian Dollar");
-        };
+        });
         CurrencyService service = new CurrencyService(flakyProvider, clock, LIST_TTL);
         service.supportedCurrencies();
 
@@ -90,12 +91,12 @@ class CurrencyServiceTest {
     @DisplayName("The one where the first load fails, the provider recovers, and the next request loads the list")
     void loadsListOnceProviderRecoversAfterFailedFirstLoad() {
         AtomicBoolean providerDown = new AtomicBoolean(true);
-        RatesProvider recoveringProvider = () -> {
+        RatesProvider recoveringProvider = currenciesFrom(() -> {
             if (providerDown.get()) {
                 throw new RatesProviderException("provider down", null);
             }
             return Map.of("AUD", "Australian Dollar");
-        };
+        });
         CurrencyService service = new CurrencyService(recoveringProvider, clock, LIST_TTL);
         assertThatThrownBy(service::supportedCurrencies).isInstanceOf(RatesProviderException.class);
 
