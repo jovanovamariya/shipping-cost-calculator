@@ -264,6 +264,26 @@ class ConversionServiceTest {
         assertThat(result.rateDate()).isEqualTo(LocalDate.of(2026, 8, 4));
     }
 
+    @Test
+    @DisplayName("The one where the cache TTL is configured to 2 seconds and rates fetched 3 seconds ago are expired — the provider is called again")
+    void cacheTTLIsConfigurableAndExpiresAtCustomDuration() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-17T09:00:00Z"));
+        AtomicInteger calls = new AtomicInteger(0);
+        RatesProvider provider = ratesFrom(base -> {
+            calls.incrementAndGet();
+            return new PublishedRates("EUR", LocalDate.of(2026, 11, 17), Map.of("USD", new BigDecimal("1.0850")));
+        });
+        ConversionService service = new ConversionService(
+                provider, currenciesOf("EUR", "USD"), clock, Duration.ofSeconds(2));
+
+        service.convert(new BigDecimal("100"), "EUR", "USD"); // warms cache at T=0 s
+        clock.advance(Duration.ofSeconds(3));                  // 3 s > 2 s TTL → cache expired
+
+        service.convert(new BigDecimal("100"), "EUR", "USD"); // must refresh from provider
+
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
     @ParameterizedTest(name = "The one where amount {0} is rejected as not greater than zero")
     @CsvSource({
             "0",

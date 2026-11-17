@@ -40,8 +40,9 @@ public class RatesConfig {
 
     @Bean
     ConversionService conversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock,
-                                        @Value("${rates.max-stale-age-days:-1}") int maxStaleAgeConfig) {
+                                        @Value("${rates.max-stale-age-days:-1}") int maxStaleAgeConfig,
+                                        @Value("${rates.provider.cache-ttl:1h}") Duration cacheTtl) {
         Optional<Integer> maxStaleAge = maxStaleAgeConfig < 0 ? Optional.empty() : Optional.of(maxStaleAgeConfig);
-        return new ConversionService(ratesProvider, currencyService, clock, maxStaleAge);
+        return new ConversionService(ratesProvider, currencyService, clock, cacheTtl, maxStaleAge);
     }
 }

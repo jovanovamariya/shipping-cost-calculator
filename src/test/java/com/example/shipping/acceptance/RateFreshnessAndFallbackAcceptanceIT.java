@@ -92,6 +92,34 @@ class RateFreshnessAndFallbackAcceptanceIT {
     }
 
     @Nested
+    @DisplayName("Cache TTL is configurable via rates.provider.cache-ttl")
+    @TestPropertySource(properties = "rates.provider.cache-ttl=1s")
+    class ConfigurableCacheTtl {
+
+        @Test
+        @DisplayName("The one where cache-ttl is 1 s and 2 seconds pass — provider is called again with the latest rate")
+        void providerIsCalledAgainAfterConfiguredCacheTtlElapses() {
+            // Warm cache at 09:00 with rate 1.0850
+            providerPublishesEurRates("2026-11-17", "1.0850");
+            convert("100", "EUR", "USD");
+
+            // Advance past the 1 s TTL, then publish a different rate
+            clock.advance(Duration.ofSeconds(2));
+            providerPublishesEurRates("2026-11-17", "1.2000"); // LIFO: this stub now wins
+
+            // Cache expired → provider called → result 120.00
+            // Cache still fresh (default 1 h) → cached → result 108.50
+            MvcTestResult result = convert("100", "EUR", "USD");
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$.result")
+                    .convertTo(InstanceOfAssertFactories.BIG_DECIMAL)
+                    .isEqualByComparingTo("120.00");
+        }
+    }
+
+    @Nested
     @DisplayName("Must not serve fallback rates whose publication date is older than the configured maximum stale age")
     @TestPropertySource(properties = "rates.max-stale-age-days=3")
     class MaxStaleAge {

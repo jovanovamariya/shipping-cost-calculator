@@ -19,8 +19,6 @@ import java.util.stream.Collectors;
 
 public class ConversionService {
 
-    private static final Duration RATES_TTL = Duration.ofHours(1);
-
     private record CachedRates(PublishedRates rates, Instant fetchedAt) {}
 
     /** Rates paired with a flag indicating whether they came from a stale fallback. */
@@ -29,19 +27,31 @@ public class ConversionService {
     private final RatesProvider ratesProvider;
     private final CurrencyService currencyService;
     private final Clock clock;
+    private final Duration cacheTtl;
     private final Optional<Integer> maxStaleAgeDays;
     private final Map<String, CachedRates> ratesCache = new HashMap<>();
 
     public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
-                             Clock clock, Optional<Integer> maxStaleAgeDays) {
+                             Clock clock, Duration cacheTtl, Optional<Integer> maxStaleAgeDays) {
         this.ratesProvider = ratesProvider;
         this.currencyService = currencyService;
         this.clock = clock;
+        this.cacheTtl = cacheTtl;
         this.maxStaleAgeDays = maxStaleAgeDays;
     }
 
+    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
+                             Clock clock, Duration cacheTtl) {
+        this(ratesProvider, currencyService, clock, cacheTtl, Optional.empty());
+    }
+
+    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
+                             Clock clock, Optional<Integer> maxStaleAgeDays) {
+        this(ratesProvider, currencyService, clock, Duration.ofHours(1), maxStaleAgeDays);
+    }
+
     public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock) {
-        this(ratesProvider, currencyService, clock, Optional.empty());
+        this(ratesProvider, currencyService, clock, Duration.ofHours(1), Optional.empty());
     }
 
     /** Convenience overload for tests that do not exercise clock-sensitive behaviour. */
@@ -84,7 +94,7 @@ public class ConversionService {
      */
     private FetchedRates ratesFor(String base, Instant now) {
         CachedRates cached = ratesCache.get(base);
-        if (cached != null && now.isBefore(cached.fetchedAt().plus(RATES_TTL))) {
+        if (cached != null && now.isBefore(cached.fetchedAt().plus(cacheTtl))) {
             if (tooStaleToServe(cached.rates())) throw new RatesProviderException(
                     "Cached rates exceed max stale age", new RuntimeException());
             return new FetchedRates(cached.rates(), false);

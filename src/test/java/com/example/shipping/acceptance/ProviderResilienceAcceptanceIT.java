@@ -24,9 +24,14 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.test.context.TestPropertySource;
+
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,6 +83,66 @@ class ProviderResilienceAcceptanceIT {
                         { "amount": %s, "from": "%s", "to": "%s" }
                         """.formatted(amount, from, to))
                 .exchange();
+    }
+
+    @Nested
+    @DisplayName("Must stop calling the provider when 50% or more of the calls in the last 10 minutes failed, with a minimum of 3 calls")
+    @TestPropertySource(properties = "rates.provider.cache-ttl=1s")
+    class CircuitBreaker {
+
+        @ParameterizedTest(name = "The one where {0} calls and {1} failures makes the circuit {3}")
+        @CsvSource({
+                "3, 2, true,  OPEN",   // Open: 67% failure rate (exceeds 50%)
+                "4, 2, true,  OPEN",   // Open: exactly 50% failure rate
+                "3, 1, false, CLOSED", // Closed: 33% failure rate (below 50%)
+                "2, 2, false, CLOSED", // Closed: below the 3-call minimum
+        })
+        void circuitOpensOrStaysClosedBasedOnFailureRate(
+                int totalCalls, int failures, boolean expectedOpen, String circuit) {
+            // Reset WireMock stubs between parameterized rows; re-register the currencies stub
+            provider.resetAll();
+            provider.stubFor(get("/currencies").willReturn(okJson("""
+                    { "EUR": "Euro", "USD": "United States Dollar" }
+                    """)));
+
+            int successes = totalCalls - failures;
+
+            // Successful calls first — build up the success history and warm the stale cache
+            for (int i = 0; i < successes; i++) {
+                provider.stubFor(get(urlPathEqualTo("/latest"))
+                        .withQueryParam("base", equalTo("EUR"))
+                        .willReturn(okJson("""
+                                { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                                """)));
+                convert("100", "EUR", "USD");
+                clock.advance(Duration.ofSeconds(2)); // bypass the configured 1 s cache TTL
+            }
+
+            // Failure calls — each must bypass the cache to reach (and fail) the provider
+            for (int i = 0; i < failures; i++) {
+                provider.stubFor(get(urlPathEqualTo("/latest"))
+                        .withQueryParam("base", equalTo("EUR"))
+                        .willReturn(serverError()));
+                convert("100", "EUR", "USD");
+                clock.advance(Duration.ofSeconds(2)); // bypass the 1 s cache TTL
+            }
+
+            // Verification: set provider to succeed, make one final call
+            provider.stubFor(get(urlPathEqualTo("/latest"))
+                    .withQueryParam("base", equalTo("EUR"))
+                    .willReturn(okJson("""
+                            { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                            """)));
+
+            MvcTestResult result = convert("100", "EUR", "USD");
+
+            // Circuit OPEN  → provider bypassed, stale fallback served (stale: true)
+            // Circuit CLOSED → provider called,  fresh rates returned  (stale: false)
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$.stale").asBoolean()
+                    .isEqualTo(expectedOpen);
+        }
     }
 
     @Nested
