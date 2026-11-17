@@ -3,6 +3,9 @@ package com.example.shipping.service;
 import com.example.shipping.model.ConversionResult;
 import com.example.shipping.model.PublishedRates;
 import com.example.shipping.model.SupportedCurrency;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -29,15 +32,29 @@ public class ConversionService {
     private final Clock clock;
     private final Duration cacheTtl;
     private final Optional<Integer> maxStaleAgeDays;
+    private final CircuitBreaker circuitBreaker;
     private final Map<String, CachedRates> ratesCache = new HashMap<>();
 
     public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
-                             Clock clock, Duration cacheTtl, Optional<Integer> maxStaleAgeDays) {
+                             Clock clock, Duration cacheTtl, Optional<Integer> maxStaleAgeDays,
+                             CircuitBreaker circuitBreaker) {
         this.ratesProvider = ratesProvider;
         this.currencyService = currencyService;
         this.clock = clock;
         this.cacheTtl = cacheTtl;
         this.maxStaleAgeDays = maxStaleAgeDays;
+        this.circuitBreaker = circuitBreaker;
+    }
+
+    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
+                             Clock clock, Duration cacheTtl, Optional<Integer> maxStaleAgeDays) {
+        this(ratesProvider, currencyService, clock, cacheTtl, maxStaleAgeDays, neverOpenCircuitBreaker());
+    }
+
+    private static CircuitBreaker neverOpenCircuitBreaker() {
+        return CircuitBreaker.of("rates-noop", CircuitBreakerConfig.custom()
+                .minimumNumberOfCalls(Integer.MAX_VALUE)
+                .build());
     }
 
     public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
@@ -100,9 +117,13 @@ public class ConversionService {
             return new FetchedRates(cached.rates(), false);
         }
         try {
-            PublishedRates fresh = ratesProvider.latestRates(base);
+            PublishedRates fresh = circuitBreaker.executeSupplier(() -> ratesProvider.latestRates(base));
             ratesCache.put(base, new CachedRates(fresh, now));
             return new FetchedRates(fresh, false);
+        } catch (CallNotPermittedException e) {
+            if (cached == null || tooStaleToServe(cached.rates())) throw new RatesProviderException(
+                    "Exchange rates are temporarily unavailable. Please try again later.", e);
+            return new FetchedRates(cached.rates(), true);
         } catch (RatesProviderException e) {
             if (cached == null || tooStaleToServe(cached.rates())) throw e;
             return new FetchedRates(cached.rates(), true);

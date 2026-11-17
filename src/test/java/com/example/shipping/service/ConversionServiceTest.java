@@ -2,6 +2,8 @@ package com.example.shipping.service;
 
 import com.example.shipping.model.ConversionResult;
 import com.example.shipping.model.PublishedRates;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -282,6 +284,30 @@ class ConversionServiceTest {
         service.convert(new BigDecimal("100"), "EUR", "USD"); // must refresh from provider
 
         assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("The one where the circuit is open — provider is not called, stale fallback applies")
+    void circuitOpenBypassesProviderAndReturnsStaleFallback() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-17T09:00:00Z"));
+        AtomicInteger callCount = new AtomicInteger(0);
+        RatesProvider provider = ratesFrom(base -> {
+            callCount.incrementAndGet();
+            return new PublishedRates("EUR", LocalDate.of(2026, 11, 17), Map.of("USD", new BigDecimal("1.0850")));
+        });
+        CircuitBreaker cb = CircuitBreaker.of("test", CircuitBreakerConfig.ofDefaults());
+        ConversionService service = new ConversionService(
+                provider, currenciesOf("EUR", "USD"), clock, Duration.ofSeconds(2), Optional.empty(), cb);
+
+        service.convert(new BigDecimal("100"), "EUR", "USD"); // warms cache; callCount = 1
+
+        cb.transitionToOpenState();
+        clock.advance(Duration.ofSeconds(3)); // past the 2 s TTL → cache miss on next call
+
+        ConversionResult result = service.convert(new BigDecimal("100"), "EUR", "USD");
+
+        assertThat(result.stale()).isTrue();
+        assertThat(callCount.get()).isEqualTo(1); // open circuit blocked the second provider call
     }
 
     @ParameterizedTest(name = "The one where amount {0} is rejected as not greater than zero")

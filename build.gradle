@@ -51,6 +51,8 @@ dependencies {
     testImplementation 'org.assertj:assertj-core'
     // MockMvcTester + @AutoConfigureMockMvc for acceptance tests (Boot 4 split this out).
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    // Circuit breaker around provider calls.
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.2.0'
     // Stubs the external rates provider (Frankfurter) over real HTTP.
     testImplementation 'org.wiremock:wiremock-standalone:3.13.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
