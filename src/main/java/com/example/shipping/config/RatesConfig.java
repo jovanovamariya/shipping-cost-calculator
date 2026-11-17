@@ -11,6 +11,7 @@ import org.springframework.web.client.RestClient;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 
 @Configuration
 public class RatesConfig {
@@ -33,7 +34,9 @@ public class RatesConfig {
     }
 
     @Bean
-    ConversionService conversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock) {
-        return new ConversionService(ratesProvider, currencyService, clock);
+    ConversionService conversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock,
+                                        @Value("${rates.max-stale-age-days:-1}") int maxStaleAgeConfig) {
+        Optional<Integer> maxStaleAge = maxStaleAgeConfig < 0 ? Optional.empty() : Optional.of(maxStaleAgeConfig);
+        return new ConversionService(ratesProvider, currencyService, clock, maxStaleAge);
     }
 }

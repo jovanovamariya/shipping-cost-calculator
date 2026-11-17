@@ -7,20 +7,41 @@ import com.example.shipping.model.SupportedCurrency;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 public class ConversionService {
 
+    private static final Duration RATES_TTL = Duration.ofHours(1);
+
+    private record CachedRates(PublishedRates rates, Instant fetchedAt) {}
+
+    /** Rates paired with a flag indicating whether they came from a stale fallback. */
+    private record FetchedRates(PublishedRates rates, boolean stale) {}
+
     private final RatesProvider ratesProvider;
     private final CurrencyService currencyService;
     private final Clock clock;
+    private final Optional<Integer> maxStaleAgeDays;
+    private final Map<String, CachedRates> ratesCache = new HashMap<>();
 
-    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock) {
+    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService,
+                             Clock clock, Optional<Integer> maxStaleAgeDays) {
         this.ratesProvider = ratesProvider;
         this.currencyService = currencyService;
         this.clock = clock;
+        this.maxStaleAgeDays = maxStaleAgeDays;
+    }
+
+    public ConversionService(RatesProvider ratesProvider, CurrencyService currencyService, Clock clock) {
+        this(ratesProvider, currencyService, clock, Optional.empty());
     }
 
     /** Convenience overload for tests that do not exercise clock-sensitive behaviour. */
@@ -45,10 +66,43 @@ public class ConversionService {
             return new ConversionResult(amount, normFrom, normTo, result, BigDecimal.ONE, LocalDate.now(clock), false);
         }
 
-        PublishedRates rates = ratesProvider.latestRates(normFrom);
-        BigDecimal rate = rates.rates().get(normTo);
+        Instant now = clock.instant();
+        FetchedRates fetched = ratesFor(normFrom, now);
+
+        BigDecimal rate = fetched.rates().rates().get(normTo);
         BigDecimal result = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP);
-        return new ConversionResult(amount, normFrom, normTo, result, rate, rates.publicationDate(), false);
+        return new ConversionResult(amount, normFrom, normTo, result, rate, fetched.rates().publicationDate(), fetched.stale());
+    }
+
+    /**
+     * Returns rates for {@code base} and whether they are stale:
+     * cache hit (fresh by TTL, within max stale age) → stale=false;
+     * cache hit too old by publication date → throws;
+     * provider success → stale=false;
+     * provider failure with a usable prior cache entry → stale=true;
+     * no entry or entry too stale → throws.
+     */
+    private FetchedRates ratesFor(String base, Instant now) {
+        CachedRates cached = ratesCache.get(base);
+        if (cached != null && now.isBefore(cached.fetchedAt().plus(RATES_TTL))) {
+            if (tooStaleToServe(cached.rates())) throw new RatesProviderException(
+                    "Cached rates exceed max stale age", new RuntimeException());
+            return new FetchedRates(cached.rates(), false);
+        }
+        try {
+            PublishedRates fresh = ratesProvider.latestRates(base);
+            ratesCache.put(base, new CachedRates(fresh, now));
+            return new FetchedRates(fresh, false);
+        } catch (RatesProviderException e) {
+            if (cached == null || tooStaleToServe(cached.rates())) throw e;
+            return new FetchedRates(cached.rates(), true);
+        }
+    }
+
+    /** True when a max stale age is configured and the rates' publication date exceeds it. */
+    private boolean tooStaleToServe(PublishedRates rates) {
+        return maxStaleAgeDays.isPresent() &&
+               ChronoUnit.DAYS.between(rates.publicationDate(), LocalDate.now(clock)) > maxStaleAgeDays.get();
     }
 
     private Set<String> supportedCodes() {

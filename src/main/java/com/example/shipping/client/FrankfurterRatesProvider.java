@@ -38,11 +38,17 @@ public class FrankfurterRatesProvider implements RatesProvider {
 
     @Override
     public PublishedRates latestRates(String base) {
-        FrankfurterLatest latest = restClient.get()
-                .uri("/latest?base={base}", base)
-                .retrieve()
-                .body(FrankfurterLatest.class);
-        return new PublishedRates(latest.base(), latest.date(), latest.rates());
+        try {
+            FrankfurterLatest latest = restClient.get()
+                    .uri("/latest?base={base}", base)
+                    .retrieve()
+                    .body(FrankfurterLatest.class);
+            return new PublishedRates(latest.base(), latest.date(), latest.rates());
+        } catch (HttpServerErrorException e) {
+            throw new RatesProviderException("Frankfurter answered " + e.getStatusCode(), e);
+        } catch (ResourceAccessException e) {
+            throw new RatesProviderException("Frankfurter could not be reached", e);
+        }
     }
 
     /** Frankfurter's /latest response; {@code date} is the provider's publication date. */
