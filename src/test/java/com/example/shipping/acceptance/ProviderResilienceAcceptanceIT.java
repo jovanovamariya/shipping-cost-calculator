@@ -146,6 +146,65 @@ class ProviderResilienceAcceptanceIT {
     }
 
     @Nested
+    @DisplayName("Must allow one trial call once the circuit has been open for 5 minutes")
+    @TestPropertySource(properties = "rates.provider.cache-ttl=1s")
+    class HalfOpenTrialCall {
+
+        @Autowired
+        private io.github.resilience4j.circuitbreaker.CircuitBreaker circuitBreaker;
+
+        @ParameterizedTest(name = "The one where {3}")
+        @CsvSource({
+                "false, false, true,  'the circuit is still open — no trial call permitted, stale rates served'",
+                "true,  false, false, 'the open period has elapsed and the trial call succeeds — circuit closes, fresh rates returned'",
+                "true,  true,  true,  'the open period has elapsed and the trial call fails — circuit reopens, stale rates again'",
+        })
+        void trialCallAfterOpenPeriod(
+                boolean simulateHalfOpen, boolean trialFails, boolean expectedStale, String label) {
+            provider.resetAll();
+            provider.stubFor(get("/currencies").willReturn(okJson(
+                    "{ \"EUR\": \"Euro\", \"USD\": \"United States Dollar\" }")));
+
+            // Trip the circuit: 1 success + 2 failures = 3 calls, 67% → OPEN
+            provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                    .willReturn(okJson("""
+                            { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                            """)));
+            convert("100", "EUR", "USD"); // call 1: success — warms stale cache
+            clock.advance(Duration.ofSeconds(2));
+
+            provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                    .willReturn(serverError()));
+            convert("100", "EUR", "USD"); // call 2: failure (2 calls — below 3-call minimum)
+            clock.advance(Duration.ofSeconds(2));
+            convert("100", "EUR", "USD"); // call 3: failure (3 calls, 67%) → circuit OPENS
+            clock.advance(Duration.ofSeconds(2));
+
+            if (simulateHalfOpen) {
+                circuitBreaker.transitionToHalfOpenState(); // simulate 5-minute wait elapsed
+            }
+
+            // Stub the provider for the trial call (or no trial if circuit still OPEN)
+            if (trialFails) {
+                provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                        .willReturn(serverError()));
+            } else {
+                provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                        .willReturn(okJson("""
+                                { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                                """)));
+            }
+
+            MvcTestResult result = convert("100", "EUR", "USD");
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$.stale").asBoolean()
+                    .isEqualTo(expectedStale);
+        }
+    }
+
+    @Nested
     @DisplayName("Must abandon a provider call after 3 seconds and count it as a failure")
     class ThreeSecondTimeout {
 
