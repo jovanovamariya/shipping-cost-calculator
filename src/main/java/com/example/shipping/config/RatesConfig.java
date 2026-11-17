@@ -7,6 +7,7 @@ import com.example.shipping.service.RatesProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import java.time.Clock;
@@ -23,8 +24,12 @@ public class RatesConfig {
 
     @Bean
     RatesProvider ratesProvider(RestClient.Builder restClientBuilder,
-                                @Value("${rates.provider.base-url}") String baseUrl) {
-        return new FrankfurterRatesProvider(restClientBuilder, baseUrl);
+                                @Value("${rates.provider.base-url}") String baseUrl,
+                                @Value("${rates.provider.timeout:3s}") Duration timeout) {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setReadTimeout(timeout);
+        factory.setConnectTimeout(timeout);
+        return new FrankfurterRatesProvider(restClientBuilder.requestFactory(factory), baseUrl);
     }
 
     @Bean
