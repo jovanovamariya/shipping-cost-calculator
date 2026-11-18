@@ -5,9 +5,8 @@ A starter for building Spring Boot services with a Spec-Driven Development (SDD)
 <!-- ADAPT: This file is the single most important input for Claude — it's read
      before any work. Every section below is a working default for a standard
      Spring Boot REST service. Edit the content to match your project; the
-     HTML comments tell you what to change in each section. A worked example
-     (a shipping cost calculator) sits at the bottom — delete it once your own
-     sections are accurate. -->
+     HTML comments tell you what to change in each section. The concrete
+     project — a currency converter — is described at the bottom. -->
 
 ## Project Overview
 
@@ -90,8 +89,8 @@ Two tiers of tests:
 
 Conventions:
 
-- Test method names describe the business rule (`domesticOrderOver75GetsFreeShipping`), not a number (`testCalculate3`).
-- Use `@DisplayName` with plain-language, Example-Mapping-style descriptions: `"The one where a 3kg European parcel costs £7.49"`.
+- Test method names describe the business rule (`sameCurrencyConvertsAtRateOne`), not a number (`testCalculate3`).
+- Use `@DisplayName` with plain-language, Example-Mapping-style descriptions: `"The one where 100 EUR converts to 108.50 USD"`.
 - Acceptance tests verify the HTTP contract; service tests verify business logic. Don't duplicate the same assertions across both tiers.
 - Run the suite with `./gradlew test`. The `/accept` and `/tdd` workflows run it for you as part of each cycle, so you see each test go red and green yourself.
 

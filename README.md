@@ -1,18 +1,18 @@
-# Spring Boot SDD Starter
+# Currency Converter
 
-A starter for building Spring Boot services using a **Spec-Driven Development (SDD)** workflow with Claude Code. It bundles a working Spring Boot 4 / Gradle project together with a `.claude/` toolchain — skills, agents, and hooks — that turns business rules into specs, specs into acceptance tests, and tests into code, with the test suite enforced automatically on every change.
+A Spring Boot REST service that converts an amount between currencies using live rates from the [Frankfurter](https://frankfurter.dev) provider. It caches rates, falls back to the last good rates when the provider is unavailable, and wraps provider calls in a circuit breaker so the API stays responsive when the provider is slow or down.
 
-The project ships with a small example domain (a shipping cost calculator) so everything is runnable out of the box. See [Adapting This Starter](#adapting-this-starter) to make it your own.
+It is built with a **Spec-Driven Development (SDD)** workflow using Claude Code: business rules live in `docs/specs/` as markdown, each rule is driven by an acceptance test, and the full suite is enforced automatically on every change via the `.claude/` toolchain — skills, agents, and hooks.
 
 ## About This Course
 
-This starter is a resource from the Udemy course **[Spec-Driven Development in Java with TDD and Claude Code](https://www.udemy.com/course/spring-boot-ai-tdd/?referralCode=3170E302C61D48703A94)**. The course walks through building a fully fledged Spring Boot application from the ground up, using all the features of Claude Code — skills, agents, hooks, and the Spec-Driven Development workflow that this project is built around.
+This project is a resource from the Udemy course **[Spec-Driven Development in Java with TDD and Claude Code](https://www.udemy.com/course/spring-boot-ai-tdd/?referralCode=3170E302C61D48703A94)**. The course walks through building a fully fledged Spring Boot application from the ground up, using all the features of Claude Code — skills, agents, hooks, and the Spec-Driven Development workflow that this project is built around.
 
 ## Requirements
 
 - **JDK 21** (Spring Boot 4.1 / Spring Framework 7 require Java 17+; this project targets 21). Check with `java -version`.
 - No Gradle install needed — the Gradle Wrapper (`./gradlew`) is included and downloads the right version on first use.
-- Internet access on first build so Gradle can fetch dependencies.
+- Internet access on first build so Gradle can fetch dependencies, and at runtime so the service can reach the Frankfurter provider.
 
 ## Build
 
@@ -30,7 +30,7 @@ On Windows, use `gradlew.bat` in place of `./gradlew`.
 
 ```bash
 ./gradlew test                                   # run the full suite
-./gradlew test --tests '*ShippingCostServiceTest' # a single test class
+./gradlew test --tests '*ConversionServiceTest'  # a single test class
 ./gradlew test --tests '*.acceptance.*'          # only acceptance tests
 ./gradlew test --info                            # verbose output
 ```
@@ -59,19 +59,50 @@ java -jar build/libs/*.jar
 
 The service starts on **http://localhost:8080** by default.
 
-Example request against the bundled shipping calculator:
+Convert an amount between two currencies:
 
 ```bash
-curl -X POST http://localhost:8080/api/shipping/calculate \
+curl -X POST http://localhost:8080/api/convert \
   -H 'Content-Type: application/json' \
-  -d '{ "weightKg": 3.2, "zone": "EUROPEAN", "orderTotal": 50.00 }'
+  -d '{ "amount": 100, "from": "EUR", "to": "USD" }'
 ```
+
+```json
+{ "amount": 100, "from": "EUR", "to": "USD", "result": 108.50, "rate": 1.0850, "rateDate": "2026-11-11", "stale": false }
+```
+
+`result` is the converted amount (scale 2, half-up); `rate` is the exchange rate used; `rateDate` is the provider's publication date for that rate; `stale` is `true` only when the rate was served from the fallback because the provider was unavailable.
+
+List the supported currencies, sorted by code:
+
+```bash
+curl http://localhost:8080/api/currencies
+```
+
+Errors use a single shape — `{ timestamp, status, error, message, path }`, never a stack trace. An unsupported currency returns `400` with `"Unsupported currency: XYZ"`; when no usable rates are available the service returns `503`.
 
 To change the port or other settings, edit `src/main/resources/application.properties` (e.g. `server.port=9090`) or pass it at runtime: `./gradlew bootRun --args='--server.port=9090'`.
 
 ### API documentation (Swagger UI)
 
 With the app running, interactive API docs are at **http://localhost:8080/swagger-ui.html**, generated automatically from the controllers by springdoc-openapi. The raw OpenAPI spec is at `/v3/api-docs`.
+
+## Configuration
+
+All settings live in `src/main/resources/application.properties`. Override any of them at runtime (`./gradlew bootRun --args='--rates.max-stale-age-days=4'`) or via an environment variable (`RATES_MAX_STALE_AGE_DAYS=4`). The knobs specific to the currency converter:
+
+| Property | Default | Purpose |
+|---|---|---|
+| `cors.allowed-origins` | `http://localhost:5173` | Comma-separated list of browser origins allowed to call `/api/**`. Matching is exact, including scheme and port. Set this to your frontend's origin(s) in production. |
+| `rates.max-stale-age-days` | `-1` (no limit) | How many days old a fallback rate may be and still be served when the provider is unavailable. `-1` disables the limit; **≥ 4 is recommended** so a Friday publication still covers a long weekend plus a bank holiday. Beyond this age the service returns `503` instead of a stale rate. |
+| `currencies.list-ttl` | `24h` | How long the supported-currencies list is cached before it is refetched. |
+| `rates.provider.base-url` | `https://api.frankfurter.dev/v1` | Base URL of the Frankfurter rates provider. |
+| `rates.provider.timeout` | `3s` | Connect and read timeout applied to each provider call. |
+| `rates.provider.cache-ttl` | `1h` | How long a fetched rate set is served from cache before the provider is called again. |
+
+Durations use Spring's format (`3s`, `1h`, `24h`, `4d`). The circuit breaker around the provider — a 10-minute window that opens at ≥ 50% failures over a minimum of 3 calls, stays open 5 minutes, then allows one trial call — is fixed in `RatesConfig` and not currently exposed as a property.
+
+`GET /actuator/health` reports the application status and the rates circuit state; `management.endpoint.health.show-details=always` (set in `application.properties`) is what makes the circuit detail visible.
 
 ## The SDD Workflow
 
@@ -108,25 +139,3 @@ CLAUDE.md                        Project context Claude reads before any work
 .claude/hooks/                   protect-files.sh (file guard)
 .claude/settings.json            Hook wiring
 ```
-
-## Adapting This Starter
-
-This repo is a template. The `.claude/` toolchain works for any Spring Boot / Gradle project — you replace the example domain with your own. Work through these in order; most files carry `ADAPT` comments pointing at exactly what to change.
-
-1. **`CLAUDE.md`** — the most important file; Claude reads it before doing anything. Each section is a working default with an `<!-- ADAPT -->` comment explaining what to change. Replace the Project Overview, Architecture, API Design, and (if present) Processing Order / Monetary sections with your domain, and delete the *Worked Example* block at the bottom once your sections are accurate.
-
-2. **`build.gradle`** — search for `ADAPT` comments. Set your `group`, the Java version, and the dependencies your project needs (e.g. `spring-boot-starter-data-jpa`, `spring-boot-starter-validation`). Spring Security is commented out until you need it — note that adding it returns 401 on every endpoint until you configure a `SecurityFilterChain`.
-
-3. **Rename the project** — change `rootProject.name` in `settings.gradle`, the `group` in `build.gradle`, `spring.application.name` in `application.properties`, and move the code from the `com.example.shipping` package to your own. Rename the main `@SpringBootApplication` class to match.
-
-4. **`.claude/settings.json`** — if you don't use Gradle, change the test command (`./gradlew test`) in the PostToolUse and Stop hooks to your build tool (`mvn test`, etc.). The three-hook structure stays the same.
-
-5. **`.claude/hooks/protect-files.sh`** — add or remove entries in `PROTECTED_PATTERNS` for your project's sensitive files (Dockerfiles, Terraform, lock files, etc.). Matching is substring-based; exit code 2 blocks an edit.
-
-6. **`.claude/agents/architecture-guardian.md`** — replace the layer boundaries with your architecture (hexagonal, clean architecture, microservice, …). State the *rules*; the agent discovers your actual classes by reading the source tree.
-
-7. **`.claude/agents/spec-compliance.md`** — update the Processing Order / Numeric Precision / Feature Interactions / API Contract checks for your domain, or remove sections that don't apply.
-
-8. **`docs/specs/`** — starts empty. Create one `<feature>.specs.md` per feature as you `/discover` them; every rule should end up with at least one acceptance test.
-
-Keep as-is: the `.claude/` directory structure, the hook exit-code convention (exit 2 to block), and the two-tier test layout — the skills and agents assume them.
