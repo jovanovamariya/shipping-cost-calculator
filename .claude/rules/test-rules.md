@@ -12,9 +12,9 @@ You are editing test code. Tests are executable specifications.
   `test-patterns.md`.)
 - Placement: acceptance tests in `src/test/java/.../acceptance/`; service/unit
   tests beside the code they prove.
-- Name methods after the business rule (`domesticOrderOver75GetsFreeShipping`),
+- Name methods after the business rule (`sameCurrencyConvertsAtRateOne`),
   never `testCalculate3`. Use `@DisplayName` with plain-language, Example-Mapping
-  descriptions: "The one where a 3kg European parcel costs £7.49".
+  descriptions: "The one where 100 EUR converts to 108.50 USD".
 - Money assertions: compare with `compareTo()` (AssertJ `isEqualByComparingTo`),
   never `equals()` — `BigDecimal` is scale-sensitive. Assert exact values; no
   floating-point tolerance.
