@@ -1,6 +1,7 @@
 package com.example.shipping.client;
 
 import com.example.shipping.model.PublishedRates;
+import com.example.shipping.service.RatesClientErrorException;
 import com.example.shipping.service.RatesProviderException;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
@@ -15,6 +16,7 @@ import java.util.Map;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.notFound;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -80,5 +82,16 @@ class FrankfurterRatesProviderTest {
 
         assertThatThrownBy(provider::currencies)
                 .isInstanceOf(RatesProviderException.class);
+    }
+
+    @Test
+    @DisplayName("The one where Frankfurter answers 404 and the client reports a client error, not a circuit failure")
+    void reports4xxAsClientError() {
+        frankfurter.stubFor(get(urlPathEqualTo("/latest"))
+                .withQueryParam("base", equalTo("EUR"))
+                .willReturn(notFound()));
+
+        assertThatThrownBy(() -> provider.latestRates("EUR"))
+                .isInstanceOf(RatesClientErrorException.class);
     }
 }

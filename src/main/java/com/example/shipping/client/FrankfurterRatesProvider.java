@@ -1,9 +1,11 @@
 package com.example.shipping.client;
 
 import com.example.shipping.model.PublishedRates;
+import com.example.shipping.service.RatesClientErrorException;
 import com.example.shipping.service.RatesProvider;
 import com.example.shipping.service.RatesProviderException;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -44,6 +46,8 @@ public class FrankfurterRatesProvider implements RatesProvider {
                     .retrieve()
                     .body(FrankfurterLatest.class);
             return new PublishedRates(latest.base(), latest.date(), latest.rates());
+        } catch (HttpClientErrorException e) {
+            throw new RatesClientErrorException("Frankfurter answered " + e.getStatusCode(), e);
         } catch (HttpServerErrorException e) {
             throw new RatesProviderException("Frankfurter answered " + e.getStatusCode(), e);
         } catch (ResourceAccessException e) {

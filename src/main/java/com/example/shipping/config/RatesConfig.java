@@ -3,6 +3,7 @@ package com.example.shipping.config;
 import com.example.shipping.client.FrankfurterRatesProvider;
 import com.example.shipping.service.ConversionService;
 import com.example.shipping.service.CurrencyService;
+import com.example.shipping.service.RatesClientErrorException;
 import com.example.shipping.service.RatesProvider;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -49,6 +50,7 @@ public class RatesConfig {
                 .failureRateThreshold(50)
                 .waitDurationInOpenState(Duration.ofMinutes(5))
                 .permittedNumberOfCallsInHalfOpenState(1)
+                .ignoreException(e -> e instanceof RatesClientErrorException)
                 .build();
         return CircuitBreaker.of("rates", config);
     }
