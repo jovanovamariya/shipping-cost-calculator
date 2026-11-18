@@ -317,6 +317,17 @@ class ConversionServiceTest {
     }
 
     @Test
+    @DisplayName("The one where the provider returns a 4xx client error with no prior cache — exception propagates, no stale fallback")
+    void clientErrorWithNoCachePropagatesToCaller() {
+        ConversionService service = new ConversionService(
+                ratesFrom(base -> { throw new RatesClientErrorException("Frankfurter answered 404 NOT_FOUND", new RuntimeException()); }),
+                currenciesOf("EUR", "USD"));
+
+        assertThatThrownBy(() -> service.convert(new BigDecimal("100"), "EUR", "USD"))
+                .isInstanceOf(RatesClientErrorException.class);
+    }
+
+    @Test
     @DisplayName("The one where the circuit is open — provider is not called, stale fallback applies")
     void circuitOpenBypassesProviderAndReturnsStaleFallback() {
         MutableClock clock = new MutableClock(Instant.parse("2026-11-17T09:00:00Z"));
