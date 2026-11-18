@@ -287,6 +287,36 @@ class ConversionServiceTest {
     }
 
     @Test
+    @DisplayName("The one where the provider returns a 4xx client error — not counted as a circuit failure, circuit stays closed")
+    void clientErrorFromProviderDoesNotCountAsCircuitFailure() {
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-18T09:00:00Z"));
+        AtomicInteger callCount = new AtomicInteger();
+        // First call succeeds to warm the stale cache; subsequent calls throw a 4xx error
+        RatesProvider provider = ratesFrom(base -> {
+            if (callCount.getAndIncrement() == 0) {
+                return new PublishedRates(base, LocalDate.of(2026, 11, 18), Map.of("USD", new BigDecimal("1.0850")));
+            }
+            throw new RatesClientErrorException("Frankfurter answered 404 NOT_FOUND", new RuntimeException());
+        });
+        // 3-call minimum, 50% threshold: 3 counted failures would open the circuit
+        CircuitBreaker cb = CircuitBreaker.of("test", CircuitBreakerConfig.custom()
+                .minimumNumberOfCalls(3)
+                .failureRateThreshold(50)
+                .ignoreException(e -> e instanceof RatesClientErrorException)
+                .build());
+        ConversionService service = new ConversionService(
+                provider, currenciesOf("EUR", "USD"), clock, Duration.ofSeconds(2), Optional.empty(), cb);
+
+        service.convert(new BigDecimal("100"), "EUR", "USD"); // call 0: success — warms cache
+        for (int i = 0; i < 3; i++) {
+            clock.advance(Duration.ofSeconds(3)); // expire 2 s cache TTL
+            service.convert(new BigDecimal("100"), "EUR", "USD"); // 4xx — stale returned
+        }
+
+        assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
     @DisplayName("The one where the circuit is open — provider is not called, stale fallback applies")
     void circuitOpenBypassesProviderAndReturnsStaleFallback() {
         MutableClock clock = new MutableClock(Instant.parse("2026-11-17T09:00:00Z"));

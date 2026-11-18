@@ -30,6 +30,7 @@ import org.springframework.test.context.TestPropertySource;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.notFound;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.serverError;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -201,6 +202,45 @@ class ProviderResilienceAcceptanceIT {
             assertThat(result).bodyJson()
                     .extractingPath("$.stale").asBoolean()
                     .isEqualTo(expectedStale);
+        }
+    }
+
+    @Nested
+    @DisplayName("Must not count provider client errors (4xx) as failures")
+    @TestPropertySource(properties = "rates.provider.cache-ttl=1s")
+    class FourXxNotCountedAsFailures {
+
+        @Test
+        @DisplayName("The one where 3 calls in a row return 404 and the circuit stays closed")
+        void fourXxResponsesDoNotTripTheCircuit() {
+            // Warm the cache so we have stale fallback available during the 404 calls
+            provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                    .willReturn(okJson("""
+                            { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                            """)));
+            convert("100", "EUR", "USD");
+
+            // 3 × 404 — if incorrectly counted as failures: 3 calls at 100% would open the circuit
+            provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                    .willReturn(notFound()));
+            for (int i = 0; i < 3; i++) {
+                clock.advance(Duration.ofSeconds(2)); // bypass the 1 s cache TTL
+                convert("100", "EUR", "USD");
+            }
+
+            // Circuit should still be CLOSED — fresh call reaches provider and returns stale=false
+            clock.advance(Duration.ofSeconds(2));
+            provider.stubFor(get(urlPathEqualTo("/latest")).withQueryParam("base", equalTo("EUR"))
+                    .willReturn(okJson("""
+                            { "amount": 1.0, "base": "EUR", "date": "2026-11-17", "rates": { "USD": 1.0850 } }
+                            """)));
+
+            MvcTestResult result = convert("100", "EUR", "USD");
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$.stale").asBoolean()
+                    .isFalse();
         }
     }
 
