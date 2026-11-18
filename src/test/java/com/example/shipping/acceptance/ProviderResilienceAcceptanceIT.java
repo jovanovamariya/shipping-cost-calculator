@@ -245,6 +245,29 @@ class ProviderResilienceAcceptanceIT {
     }
 
     @Nested
+    @DisplayName("Should show application health and circuit state to operators")
+    class HealthAndCircuitState {
+
+        @Autowired
+        private io.github.resilience4j.circuitbreaker.CircuitBreaker circuitBreaker;
+
+        @Test
+        @DisplayName("The one where the circuit is open and the health check reports the application UP and the rates circuit OPEN")
+        void circuitOpenIsReportedInHealthCheck() {
+            circuitBreaker.transitionToOpenState();
+
+            MvcTestResult result = mvc.get().uri("/actuator/health").exchange();
+
+            assertThat(result).hasStatusOk();
+            assertThat(result).bodyJson()
+                    .extractingPath("$.status").asString().isEqualTo("UP");
+            assertThat(result).bodyJson()
+                    .extractingPath("$.components.circuitBreakers.details.rates.details.state")
+                    .asString().isEqualTo("OPEN");
+        }
+    }
+
+    @Nested
     @DisplayName("Must abandon a provider call after 3 seconds and count it as a failure")
     class ThreeSecondTimeout {
 
